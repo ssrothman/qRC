@@ -42,7 +42,7 @@ class Corrector:
       return (qdata_high-qdata_low)/(qmc_high-qmc_low) * (Y - qmc_low) + qdata_low
 
    def __call__(self):
-      return np.array([ self.correctEvent(iev) for iev in xrange(self.Y.size) ]).ravel()
+      return np.array([ self.correctEvent(iev) for iev in range(self.Y.size) ]).ravel()
 
 def applyCorrection(mcclf,dataclf,X,Y,diz=False):
    return Corrector(mcclf,dataclf,X,Y,diz)()

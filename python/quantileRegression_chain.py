@@ -9,12 +9,13 @@ import yaml
 import os
 import ROOT as rt
 from root_pandas import read_root
+import pickle
 
 from joblib import delayed, Parallel, parallel_backend, register_parallel_backend
 
 from ..tmva.IdMVAComputer import IdMvaComputer, helpComputeIdMva
 from ..tmva.eleIdMVAComputer import eleIdMvaComputer, helpComputeEleIdMva
-from Corrector import Corrector, applyCorrection
+from .Corrector import Corrector, applyCorrection
 #from sklearn.externals.joblib import Parallel, parallel_backend, register_parallel_backend
 
 
@@ -89,10 +90,10 @@ class quantileRegression_chain(object):
         else:
             df = read_root(path,tree,columns=self.branches)
         
-        print 'Dataframe with columns {}'.format(df.columns)
+        print('Dataframe with columns {}'.format(df.columns))
         index = np.array(df.index)
         
-        print 'Reshuffling events'
+        print('Reshuffling events')
         np.random.seed(rndm)
         np.random.shuffle(index)
         df = df.ix[index]
@@ -100,15 +101,15 @@ class quantileRegression_chain(object):
         df.query('probePt>@self.ptmin and probePt<@self.ptmax and probeScEta>@self.etamin and probeScEta<@self.etamax and probePhi>@self.phimin and probePhi<@self.phimax',inplace=True)
 
         if self.EBEE == 'EB':
-            print 'Selecting events from EB'
+            print('Selecting events from EB')
             df.query('probeScEta>-1.4442 and probeScEta<1.4442',inplace=True)
         elif self.EBEE == 'EE':
-            print 'Selecting events from EE'
+            print('Selecting events from EE')
             df.query('probeScEta<-1.556 or probeScEta>1.556',inplace=True)
         
         
         if cut is not None:
-            print 'Applying cut {}'.format(cut)
+            print('Applying cut {}'.format(cut))
             df.query(cut,inplace=True)
         
         df.reset_index(drop=True, inplace=True)
@@ -117,14 +118,14 @@ class quantileRegression_chain(object):
             df['probePhoIso_corr_sto'] = df['probePhoIso_corr']
             
         if split is not None:
-            print 'Splitting dataframe in train and test sample. Split size is at {}%'.format(int(split*100))
+            print('Splitting dataframe in train and test sample. Split size is at {}%'.format(int(split*100)))
             df_train = df[0:int(split*df.index.size)]
             df_test = df[int(split*df.index.size):]
-            print 'Number of events in training dataframe {}. Saving to {}/{}_(train/test).h5'.format(df_train.index.size,self.workDir,outname)
+            print('Number of events in training dataframe {}. Saving to {}/{}_(train/test).h5'.format(df_train.index.size,self.workDir,outname))
             df_train.to_hdf('{}/{}_train.h5'.format(self.workDir,outname),'df',mode='w',format='t')
             df_test.to_hdf('{}/{}_test.h5'.format(self.workDir,outname),'df',mode='w',format='t')
         else:
-            print 'Number of events in dataframe {}. Saving to {}/{}.h5'.format(df.index.size,self.workDir,outname)
+            print('Number of events in dataframe {}. Saving to {}/{}.h5'.format(df.index.size,self.workDir,outname))
             df.to_hdf('{}/{}.h5'.format(self.workDir,outname),'df',mode='w',format='t')
             
         return df
@@ -152,14 +153,24 @@ class quantileRegression_chain(object):
         df: pandas dataframe
         """
         
-        if rsh:
-            df = pd.read_hdf('{}/{}'.format(self.workDir,h5name), 'df', columns=columns)
+        if h5name.endswith(".pickle"):
+            with open("%s/%s"%(self.workDir, h5name), 'rb') as f:
+                x = pickle.load(f)
+            if rsh:
+              df = pd.DataFrame(x)
+            else:
+              df = pd.DataFrame(x[start:stop, :])
         else:
-            df = pd.read_hdf('{}/{}'.format(self.workDir,h5name), 'df', columns=columns, start=start, stop=stop)
+            if rsh:
+                df = pd.read_hdf('{}/{}'.format(self.workDir,h5name), 'df', columns=columns)
+            else:
+                df = pd.read_hdf('{}/{}'.format(self.workDir,h5name), 'df', columns=columns, start=start, stop=stop)
         
+        df.columns = df.columns.astype(str)
+
         index = np.array(df.index)
         if rsh:
-            print 'Reshuffling events'
+            print('Reshuffling events')
             np.random.seed(rndm)
             np.random.shuffle(index)
             df = df.ix[index]
@@ -170,11 +181,22 @@ class quantileRegression_chain(object):
 
         df = df[start:stop]
 
-        if self.EBEE == 'EB' and df[abs(df['probeScEta']>1.4442)].index.size>0:
-            df.query('probeScEta>-1.4442 and probeScEta<1.4442',inplace=True)
-        elif self.EBEE == 'EE' and df[abs(df['probeScEta']<1.556)].index.size>0:
-            df.query('probeScEta<-1.556 or probeScEta>1.556',inplace=True)
-        
+        #TODO: actually have the necessary 4 columns in the .pickle data frame
+        #TODO: name the columns 'var0', 'var1', etc rather than '0', '1', etc 
+        #   otherwise sklearn complains :(
+        if not h5name.endswith(".pickle"):
+          if self.EBEE == 'EB' and df[abs(df['probeScEta']>1.4442)].index.size>0:
+              df.query('probeScEta>-1.4442 and probeScEta<1.4442',inplace=True)
+          elif self.EBEE == 'EE' and df[abs(df['probeScEta']<1.556)].index.size>0:
+              df.query('probeScEta<-1.556 or probeScEta>1.556',inplace=True)
+        else:
+              #bullshit invent probePt, probeScEta, probePhi, rho columns
+              Nevt = len(df['0'])
+              print("Nevt =", Nevt)
+              df['probePt'] = np.random.random(Nevt)
+              df['probeScEta'] = np.random.random(Nevt)
+              df['probePhi'] = np.random.random(Nevt)
+              df['rho'] = np.random.random(Nevt)
         if df.index.size==0:
             raise ValueError('Wrong dataframe selected!')
 
@@ -185,7 +207,7 @@ class quantileRegression_chain(object):
         Method to load MC dataframe. See ``_loadDf`` for Arguments
         """
         
-        print 'Loading MC Dataframe from: {}/{}'.format(self.workDir,h5name)
+        print('Loading MC Dataframe from: {}/{}'.format(self.workDir,h5name))
         self.MC = self._loadDF(h5name,start,stop,rndm,rsh,columns)
         
     def loadDataDF(self,h5name,start=0,stop=-1,rndm=12345,rsh=False,columns=None):
@@ -193,7 +215,7 @@ class quantileRegression_chain(object):
         Method to load data dataframe. See ``_loadDf`` for Arguments
         """
         
-        print 'Loading data Dataframe from: {}/{}'.format(self.workDir,h5name)
+        print('Loading data Dataframe from: {}/{}'.format(self.workDir,h5name))
         self.data = self._loadDF(h5name,start,stop,rndm,rsh,columns)
 
     def trainOnData(self,var,maxDepth=5,minLeaf=500,weightsDir='/weights_qRC'):
@@ -255,7 +277,7 @@ class quantileRegression_chain(object):
 
         name_key = 'data' if 'data' in key else 'mc'
 
-        print 'Training quantile regression on {} for {} with features {}'.format(key,var,features)
+        print('Training quantile regression on {} for {} with features {}'.format(key,var,features))
 
         with parallel_backend(self.backend):
             Parallel(n_jobs=len(self.quantiles),verbose=20)(delayed(trainClf)(q,maxDepth,minLeaf,X,Y,save=True,outDir='{}/{}'.format(self.workDir,weightsDir),name='{}_weights_{}_{}_{}'.format(name_key,self.EBEE,var,str(q).replace('.','p')),X_names=features,Y_name=var) for q in self.quantiles)
@@ -285,7 +307,7 @@ class quantileRegression_chain(object):
         if X.isnull().values.any():
             raise KeyError('Correct {} first!'.format(self.vars[:self.vars.index(var)]))
 
-        print "Features: X = ", features, " target y = ", var
+        print("Features: X = ", features, " target y = ", var)
         
         Y = Y.values.reshape(-1,1)
         Z = np.hstack([X,Y])
@@ -321,10 +343,10 @@ class quantileRegression_chain(object):
 
         if diz:
             querystr = '{0}!=0 and {0}_corr!=0'.format(var)
+            df = self.MC.query(querystr)
         else:
-            querystr = '{0}=={0}'.format(var)
+            df = self.MC
 
-        df = self.MC.query(querystr)
 
         df['{}_corr_diff_scale'.format(var)] = robSca.fit_transform(np.array(df['{}_corr'.format(var)] - df[var]).reshape(-1,1))
         pkl.dump(robSca,gzip.open('{}/{}/scaler_mc_{}_{}_corr_diff.pkl'.format(self.workDir,weightsDir,self.EBEE,var),'wb'),protocol=pkl.HIGHEST_PROTOCOL)
@@ -344,7 +366,7 @@ class quantileRegression_chain(object):
         clf.fit(X,Y)
 
         name = 'weights_finalRegressor_{}_{}'.format(self.EBEE,var)
-        print 'Saving final regrssion trained with features {} for {} to {}/{}.pkl'.format(features,'{}_corr_diff_scale'.format(var),weightsDir,name)
+        print('Saving final regrssion trained with features {} for {} to {}/{}.pkl'.format(features,'{}_corr_diff_scale'.format(var),weightsDir,name))
         dic = {'clf': clf, 'X': features, 'Y': '{}_corr_diff_scale'.format(var)}
         pkl.dump(dic,gzip.open('{}/{}/{}.pkl'.format(self.workDir,weightsDir,name),'wb'),protocol=pkl.HIGHEST_PROTOCOL)
         
@@ -664,7 +686,7 @@ def trainClf(alpha,maxDepth,minLeaf,X,Y,save=False,outDir=None,name=None,X_names
     if save and (outDir is None or name is None or X_names is None or Y_name is None):
         raise TypeError('outDir, name, X_names and Y_name must not be NoneType if save=True')
     if save:
-        print 'Saving clf trained with features {} for {} to {}/{}.pkl'.format(X_names,Y_name,outDir,name)
+        print('Saving clf trained with features {} for {} to {}/{}.pkl'.format(X_names,Y_name,outDir,name))
         dic = {'clf': clf, 'X': X_names, 'Y': Y_name}
         pkl.dump(dic,gzip.open('{}/{}.pkl'.format(outDir,name),'wb'),protocol=pkl.HIGHEST_PROTOCOL)
     
